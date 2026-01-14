@@ -86,7 +86,7 @@ def load_movies(cur : Cursor, data: DataFrame):
 
     # Converting Director names to director id
     data_to_insert["Director"] = data_to_insert["Director"].map(mapping)
-    data_to_insert = data_to_insert.rename(columns={'Direcotrs':'Director_id'})
+    data_to_insert = data_to_insert.rename(columns={'Directors':'Director_id'})
     
     # Creating list of tuples for entry
     data_tuples = list(data_to_insert.itertuples(index=False,name=None))
@@ -157,7 +157,7 @@ def load_movies_genres(cur: Cursor, data: DataFrame):
     cur.executemany(INSERT_QUERY,data_tuples)
 
 
-def load_movies_actors(cur: Cursor, data: Tuple):
+def load_movies_actors(cur: Cursor, data: DataFrame):
     # Getting mappings
     cur.execute("SELECT id,title FROM movies")
     data_movies = cur.fetchall()
@@ -209,8 +209,6 @@ def load_data(cur : Cursor, data : DataFrame):
     movies_genres_data = data[["Series_Title","Genre"]].copy()
 
     movies_actors_data = data[["Series_Title","Stars"]].copy()
-    
-    reset_sequence(cur)
 
     load_directors(cur,directors_data)
     load_movies(cur, movies_data)
@@ -251,15 +249,18 @@ def connect_db() -> Connection:
 
     return connection
 
-def db_setup(file_name : str = FILE_NAME):
+def db_setup(file_name : str = FILE_NAME, reset = False):
     # Basically everything that main does without test queries , so that it can be called in main.py
     data = read(file_name)
 
     connection = connect_db()
     cur = connection.cursor()
 
-    load_data(cur, data)
+    if reset:
+        reset_sequence(cur)
 
+    load_data(cur, data)
+    connection.commit()
     verify_load(cur)
 
     cur.close()
@@ -267,7 +268,7 @@ def db_setup(file_name : str = FILE_NAME):
 
 if __name__ == "__main__":
     # Check the connections and the functions
-    db_setup()
+    db_setup("movies.csv", True)
 
 
     
