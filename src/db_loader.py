@@ -20,6 +20,7 @@ def read(file_name : str) -> DataFrame:
     # Pathing
     path = DATA_DIR / file_name
 
+    # Path error handling
     if not path.exists():
         raise FileNotFoundError(f"{file_name} not found in data directory")
     data = pd.read_csv(path)
@@ -29,11 +30,13 @@ def read(file_name : str) -> DataFrame:
     data = data.drop(columns=["Poster_Link"], axis = 'columns')
     data = data.drop_duplicates()
 
+    # Checking for presence of required columns
     REQUIRED_COLUMNS = ["Series_Title","Director","Released_Year","Genre"]
     missing = [col for col in REQUIRED_COLUMNS if col not in data.columns]
     if missing:
         raise ValueError(f"Missing columns :{missing}")
     
+    # Handling non-numeric values in year column
     data['Released_Year'] = pd.to_numeric(data['Released_Year'], errors="coerce")
     data = data.dropna(subset=["Series_Title","Director", "Released_Year","Genre"])
 
@@ -59,9 +62,9 @@ def read(file_name : str) -> DataFrame:
     
     return data
 
-def load_directors(cur : Cursor,data):
+def load_directors(cur : Cursor,data : DataFrame):
     # Loading the data into directors table
-    data_to_insert = list(map(lambda x: (x,),data))
+    data_to_insert = list(map(lambda x: (x,),data.unique()))
 
     INSERT_QUERY = """INSERT INTO directors(name)
     VALUES(%s) ON CONFLICT (name) DO NOTHING;
@@ -70,18 +73,22 @@ def load_directors(cur : Cursor,data):
     cur.executemany(INSERT_QUERY, data_to_insert)
 
 def load_movies(cur : Cursor, data: DataFrame):
-    
+    # Loading data into movies table
     data_to_insert = data.copy()
 
     cur.execute("SELECT * FROM directors")
     director_data = cur.fetchall()
 
+    # Creating mapping for Director name -> director id
     mapping = {}
     for id,name in director_data:
         mapping[name] = id
 
+    # Converting Director names to director id
     data_to_insert["Director"] = data_to_insert["Director"].map(mapping)
-
+    data_to_insert = data_to_insert.rename(columns={'Direcotrs':'Director_id'})
+    
+    # Creating list of tuples for entry
     data_tuples = list(data_to_insert.itertuples(index=False,name=None))
     
     INSERT_QUERY = """INSERT INTO movies(title,release_year, certificate, runtime, overview, meta_score, rating, votes, gross, director_id)
@@ -90,8 +97,13 @@ def load_movies(cur : Cursor, data: DataFrame):
 
     cur.executemany(INSERT_QUERY,data_tuples)
 
-def load_genres(cur: Cursor, data : Tuple):
-    genres_tuples = [(genre,) for genre in data]
+def load_genres(cur: Cursor, data : DataFrame):
+
+    genre_data = data.unique()
+
+    # Creating list of tuples for insert
+    # Using (genre,) ensures that it creates tuple of the entire word, instead of individual characters
+    genres_tuples = [(genre,) for genre in genre_data]
 
     INSERT_QUERY = """INSERT INTO genres(genre)
     VALUES(%s);
@@ -99,8 +111,12 @@ def load_genres(cur: Cursor, data : Tuple):
 
     cur.executemany(INSERT_QUERY, genres_tuples)
 
-def load_actors(cur: Cursor, data: Tuple):
-    actors_tuples = [(actor,) for actor in data]
+def load_actors(cur: Cursor, data: DataFrame):
+
+    actors_data = data.unique()
+
+    # Creating tuples for entry
+    actors_tuples = [(actor,) for actor in actors_data]
 
     INSERT_QUERY = """INSERT INTO actors(name)
     VALUES(%s);
@@ -108,7 +124,9 @@ def load_actors(cur: Cursor, data: Tuple):
 
     cur.executemany(INSERT_QUERY, actors_tuples)
 
-def load_movies_genres(cur: Cursor, data: Tuple):
+def load_movies_genres(cur: Cursor, data: DataFrame):
+
+    # Getting the movie_id mapping
     cur.execute("SELECT id,title FROM movies")
     data_movies = cur.fetchall()
 
@@ -116,27 +134,31 @@ def load_movies_genres(cur: Cursor, data: Tuple):
     for id, movie in data_movies:
         movie_mapping[movie] = id
 
+    # Getting the genre_id mapping
     cur.execute("SELECT id,genre FROM genres")
     data_genres = cur.fetchall()
     genre_mapping = {}
     for id,genre in data_genres:
         genre_mapping[genre] = id
 
+
     data_to_insert = data.copy()
     data_to_insert['Series_Title'] = data_to_insert['Series_Title'].map(movie_mapping)
 
     data_to_insert = data_to_insert.explode('Genre', ignore_index = True)
-   
-    data_to_insert['Genre'] = data_to_insert['Genre'].apply(lambda x : genre_mapping[x])
+    data_to_insert['Genre'] = data_to_insert['Genre'].map(genre_mapping)
+    data_to_insert = data_to_insert.rename(columns={'Genre':'Genre_id','Series_Title':'movie_id'})    
     data_tuples = list(set(data_to_insert.itertuples(index=False, name = None)))
-
+    
     INSERT_QUERY = """INSERT INTO movies_genres(movie_id, genre_id)
-    VALUES(%s, %s);
+    VALUES(%s, %s)
     """
 
     cur.executemany(INSERT_QUERY,data_tuples)
 
+
 def load_movies_actors(cur: Cursor, data: Tuple):
+    # Getting mappings
     cur.execute("SELECT id,title FROM movies")
     data_movies = cur.fetchall()
 
@@ -150,12 +172,14 @@ def load_movies_actors(cur: Cursor, data: Tuple):
     for id,actor in data_actors:
         actor_mapping[actor] = id
 
+    # Applying mappings
     data_to_insert = data.copy()
     data_to_insert['Series_Title'] = data_to_insert['Series_Title'].map(movie_mapping)
 
     data_to_insert = data_to_insert.explode('Stars', ignore_index = True)
    
-    data_to_insert['Stars'] = data_to_insert['Stars'].apply(lambda x : actor_mapping[x])
+    data_to_insert['Stars'] = data_to_insert['Stars'].map(actor_mapping)
+    data_to_insert = data_to_insert.rename(columns = {'Stars' : 'Actor_id','Series_Title' :'Movie_id'})
     data_tuples = list(set(data_to_insert.itertuples(index=False, name = None)))
 
     INSERT_QUERY = """INSERT INTO movies_actors(movie_id, actor_id)
@@ -176,13 +200,11 @@ def load_data(cur : Cursor, data : DataFrame):
     
     movies_data = data[["Series_Title", "Released_Year", "Certificate", "Runtime", "Overview", "Meta_score", "IMDB_Rating", "No_of_Votes","Gross","Director"]]
 
-    # numpy array
-    directors_data = data["Director"].unique()
+    directors_data = data["Director"].copy()
 
-    # set
-    genres_data = set(data['Genre'].explode())
+    genres_data = data['Genre'].explode()
     
-    actors_data = set(data['Stars'].explode())
+    actors_data = data['Stars'].explode()
 
     movies_genres_data = data[["Series_Title","Genre"]].copy()
 
@@ -197,12 +219,26 @@ def load_data(cur : Cursor, data : DataFrame):
     load_movies_genres(cur,movies_genres_data)
     load_movies_actors(cur,movies_actors_data)
 
-    
-
 
 def verify_load(cur : Cursor):
     # Just a few queries to test that data has been loaded
-    pass
+    cur.execute("SELECT * FROM movies LIMIT 5")
+    print(cur.fetchall())
+
+    cur.execute("SELECT * FROM directors LIMIT 5")
+    print(cur.fetchall())
+
+    cur.execute("SELECT * FROM genres LIMIT 5")
+    print(cur.fetchall())
+
+    cur.execute("SELECT * FROM actors LIMIT 5")
+    print(cur.fetchall())
+
+    cur.execute("SELECT * FROM movies_genres LIMIT 5")
+    print(cur.fetchall())
+
+    cur.execute("SELECT * FROM movies_actors LIMIT 5")
+    print(cur.fetchall())
 
 def connect_db() -> Connection:
     
@@ -223,6 +259,8 @@ def db_setup(file_name : str = FILE_NAME):
     cur = connection.cursor()
 
     load_data(cur, data)
+
+    verify_load(cur)
 
     cur.close()
     connection.close()
