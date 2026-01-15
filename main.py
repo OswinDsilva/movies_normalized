@@ -3,6 +3,5 @@ from src.queries import test_query
 
 FILE_NAME = "movies.csv"
 
-if __name__ == "__main__":
-    
-    db_setup()
+if __name__ == "__main__":    
+    db_setup(FILE_NAME,True)

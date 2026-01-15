@@ -86,7 +86,7 @@ def load_movies(cur : Cursor, data: DataFrame):
 
     # Converting Director names to director id
     data_to_insert["Director"] = data_to_insert["Director"].map(mapping)
-    data_to_insert = data_to_insert.rename(columns={'Directors':'Director_id'})
+    data_to_insert = data_to_insert.rename(columns={'Director':'Director_id'})
     
     # Creating list of tuples for entry
     data_tuples = list(data_to_insert.itertuples(index=False,name=None))
@@ -189,6 +189,9 @@ def load_movies_actors(cur: Cursor, data: DataFrame):
     cur.executemany(INSERT_QUERY,data_tuples)
 
 def reset_sequence(cur):
+    cur.execute("TRUNCATE movies,directors,genres,movies_actors,movies_genres, actors;")
+
+
     RESET_QUERY = "ALTER SEQUENCE movies_id_seq RESTART WITH 1 ;"
 
     cur.execute("ALTER SEQUENCE movies_id_seq RESTART WITH 1 ;")
